@@ -1,0 +1,1150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Post Editor (local)</title>
+<!--
+  Private, local-only post editor.
+  Open this file by double-clicking it. It is NOT part of the website: it lives outside
+  src/app and public, so it is never built or deployed, and tools/ is git-ignored.
+  It works offline and never sends anything anywhere. "Download .md" saves the post;
+  move the file into content/posts/.
+-->
+<style>
+  :root {
+    --font-sans: "Helvetica Neue", Helvetica, Arial, "Segoe UI", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --paper: #ffffff;
+    --canvas: #f5f4f2;
+    --ink: #222222;
+    --ink-strong: #111111;
+    --muted: #6e6e6e;
+    --faint: #a3a3a3;
+    --line: #e8e6e3;
+    --accent: #da3a2f;
+    --accent-dark: #b92d23;
+    --accent-soft: #fbeceb;
+    --ok: #2f8f4e;
+    --shadow-paper: 0 1px 3px 0 rgba(99, 99, 99, 0.15);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    flex-direction: column;
+  }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Top bar */
+  .topbar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 16px; background: var(--paper); box-shadow: var(--shadow-paper);
+    position: relative; z-index: 2;
+  }
+  .brand { font-weight: 700; color: var(--ink-strong); }
+  .brand small {
+    font-size: 10px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase;
+    color: var(--accent); margin-left: 8px;
+  }
+  .spacer { flex: 1; }
+  .status { font-size: 12px; color: var(--muted); }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px;
+    padding: 7px 14px; border: 1px solid var(--line); background: #fff; cursor: pointer;
+    transition: background-color .15s, border-color .15s, color .15s; white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--ink); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
+
+  /* Layout */
+  .main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; }
+  .pane { overflow-y: auto; min-height: 0; }
+  .editor-pane { padding: 16px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 14px; }
+  .preview-pane { padding: 24px; }
+  .tabs { display: none; }
+  @media (max-width: 900px) {
+    .main { display: block; }
+    .pane { overflow: visible; }
+    .tabs { display: flex; gap: 0; padding: 0 16px; background: var(--paper); border-top: 1px solid var(--line); }
+    .tabs button { flex: 1; padding: 10px; border: 0; background: none; font-weight: 700; cursor: pointer; border-bottom: 2px solid transparent; }
+    .tabs button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
+    body[data-view="edit"] .preview-pane, body[data-view="preview"] .editor-pane { display: none; }
+    .editor-pane { border-right: 0; }
+    .preview-pane { padding: 16px; }
+  }
+
+  /* Form */
+  .card { background: var(--paper); box-shadow: var(--shadow-paper); padding: 16px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .full { grid-column: 1 / -1; }
+  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  .label {
+    display: block; font-size: 11px; font-weight: 700; color: var(--ink-strong); margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: .08em;
+  }
+  .help { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .help code { font-family: var(--font-mono); font-size: 11px; background: var(--canvas); padding: 1px 4px; }
+  .input {
+    width: 100%; background: #fff; border: 1px solid var(--line); padding: 7px 10px; font-size: 14px;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .input[aria-invalid="true"] { border-color: var(--accent); }
+  textarea.input { resize: vertical; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+  .check input { width: 16px; height: 16px; accent-color: var(--accent); }
+  details > summary {
+    cursor: pointer; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); margin-top: 4px;
+  }
+  details[open] > summary { margin-bottom: 12px; }
+  .error { color: var(--accent); font-size: 12px; margin-top: 3px; }
+
+  /* Toolbar + body */
+  .body-card { display: flex; flex-direction: column; flex: 1; min-height: 420px; padding: 0; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px; border-bottom: 1px solid var(--line); background: #fbfaf8; }
+  .toolbar button {
+    border: 1px solid transparent; background: none; padding: 4px 8px; font-size: 12px; font-weight: 700;
+    cursor: pointer; color: var(--ink); min-width: 30px;
+  }
+  .toolbar button:hover { background: #fff; border-color: var(--line); }
+  .toolbar .sep { width: 1px; background: var(--line); margin: 2px 4px; }
+  .toolbar .accent { color: var(--accent); }
+  #body {
+    flex: 1; border: 0; padding: 14px; resize: none; outline: none; min-height: 380px;
+    font-family: var(--font-mono); font-size: 13.5px; line-height: 1.7; tab-size: 2; background: #fff;
+  }
+  .counter { font-size: 12px; color: var(--muted); padding: 6px 14px; border-top: 1px solid var(--line); }
+
+  /* Preview: matches the site's post page */
+  .notice { font-size: 12px; color: var(--muted); text-align: center; margin: 0 0 12px; }
+  .article { background: var(--paper); box-shadow: var(--shadow-paper); max-width: 760px; margin: 0 auto; }
+  .article header { padding: 40px 40px 24px; text-align: center; }
+  .article .cat { font-size: 11px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; color: var(--accent); }
+  .article h1 { font-size: 34px; line-height: 1.2; color: var(--ink-strong); margin: 10px 0 0; }
+  .article .meta { font-size: 13px; color: var(--muted); margin-top: 12px; }
+  .article .badges { margin-top: 10px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+  .badge { font-size: 10px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase; padding: 2px 8px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.red { color: var(--accent); border-color: #f1c9c6; background: var(--accent-soft); }
+  .article .cover { width: 100%; display: block; }
+  .article .content-wrap { padding: 32px 40px 40px; }
+  .article .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--line); }
+  .article .tags span { font-size: 12px; padding: 3px 10px; background: var(--canvas); }
+  @media (max-width: 560px) {
+    .article header { padding: 28px 18px 16px; }
+    .article h1 { font-size: 26px; }
+    .article .content-wrap { padding: 20px 18px 28px; }
+  }
+
+  .post-content { font-size: 17px; line-height: 1.75; color: var(--ink); overflow-wrap: break-word; }
+  .post-content > * { margin: 0; }
+  .post-content > * + * { margin-top: 1.25em; }
+  .post-content h2, .post-content h3, .post-content h4 { color: var(--ink-strong); font-weight: 700; line-height: 1.3; margin-top: 2em; }
+  .post-content > :first-child { margin-top: 0; }
+  .post-content h2 { font-size: 1.6rem; }
+  .post-content h3 { font-size: 1.3rem; }
+  .post-content h4 { font-size: 1.1rem; }
+  .post-content a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  .post-content ul, .post-content ol { padding-left: 1.5em; }
+  .post-content li + li { margin-top: .4em; }
+  .post-content li ul, .post-content li ol { margin-top: .4em; }
+  .post-content blockquote { border-left: 3px solid var(--accent); padding: .2em 0 .2em 1.25em; color: var(--muted); font-size: 1.15rem; font-style: italic; }
+  .post-content blockquote > * + * { margin-top: .8em; }
+  .post-content blockquote p { margin: 0; }
+  .post-content hr { border: 0; margin: 2.5em auto; width: 80px; border-top: 2px solid var(--line); }
+  .post-content :not(pre) > code { font-family: var(--font-mono); font-size: .88em; background: var(--canvas); padding: .15em .4em; border-radius: 3px; }
+  .post-content pre { font-family: var(--font-mono); font-size: .875rem; line-height: 1.65; background: #1f2023; color: #e6e6e6; padding: 1.1em 1.25em; overflow-x: auto; border-radius: 4px; }
+  .post-content img { max-width: 100%; height: auto; }
+  .post-content figure { margin-left: 0; margin-right: 0; }
+  .post-content figure img { width: 100%; display: block; }
+  .post-content figcaption { text-align: center; color: var(--muted); font-size: .85rem; margin-top: .6em; }
+  .post-content .table-wrap { overflow-x: auto; }
+  .post-content table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+  .post-content th, .post-content td { border: 1px solid var(--line); padding: .55em .8em; text-align: left; vertical-align: top; }
+  .post-content th { background: var(--canvas); font-weight: 700; }
+  .video-embed { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+  .video-embed iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .prompt-block { border: 1px solid var(--line); border-left: 3px solid var(--accent); background: #fbfaf8; }
+  .prompt-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .6rem .9rem; border-bottom: 1px solid var(--line); }
+  .prompt-title { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .15em; color: var(--ink-strong); }
+  .prompt-copy { font-size: .75rem; font-weight: 700; padding: .3rem .75rem; background: var(--accent); color: #fff; border: 0; cursor: pointer; min-width: 4.5rem; }
+  .prompt-copy[data-copied="true"] { background: var(--ok); }
+  .post-content .prompt-text { margin: 0; background: transparent; color: var(--ink); font-size: .88rem; white-space: pre-wrap; word-break: break-word; padding: .9rem; border-radius: 0; }
+  .img-missing { display: block; padding: 24px; text-align: center; background: var(--canvas); color: var(--muted); font-size: 13px; border: 1px dashed var(--line); }
+
+  /* Dialog */
+  dialog { border: 0; padding: 0; box-shadow: 0 10px 40px rgba(0,0,0,.25); width: min(460px, calc(100vw - 32px)); }
+  dialog::backdrop { background: rgba(17,17,17,.35); }
+  dialog form { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+  dialog h2 { margin: 0; font-size: 16px; color: var(--ink-strong); }
+  dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink-strong); color: #fff;
+    padding: 10px 16px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.25); opacity: 0; pointer-events: none;
+    transition: opacity .2s; max-width: calc(100vw - 32px); z-index: 10;
+  }
+  .toast.show { opacity: 1; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body data-view="edit">
+  <div class="topbar">
+    <span class="brand">Post Editor<small>Local only</small></span>
+    <span class="spacer"></span>
+    <span class="status" id="status" aria-live="polite"></span>
+    <button class="btn" type="button" id="btn-new" title="Start a new, empty post">New</button>
+    <button class="btn" type="button" id="btn-open" title="Open an existing .md post to edit it">Open .md</button>
+    <input type="file" id="file-open" accept=".md,.markdown,text/markdown" hidden>
+    <button class="btn btn-primary" type="button" id="btn-download" title="Ctrl+S">Download .md</button>
+  </div>
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" data-view="edit" aria-selected="true">Write</button>
+    <button type="button" role="tab" data-view="preview" aria-selected="false">Preview</button>
+  </div>
+
+  <main class="main">
+    <section class="pane editor-pane" aria-label="Editor">
+      <div class="card">
+        <div class="grid">
+          <div class="full">
+            <label class="label" for="f-title">Title</label>
+            <input class="input" id="f-title" maxlength="200" placeholder="My new post" autocomplete="off">
+            <div class="error" id="err-title" hidden>A title is required.</div>
+          </div>
+          <div class="full">
+            <label class="label" for="f-slug">File name / URL</label>
+            <input class="input" id="f-slug" maxlength="80" placeholder="my-new-post" autocomplete="off" spellcheck="false">
+            <div class="help" id="slug-help"></div>
+            <div class="error" id="err-slug" hidden></div>
+          </div>
+          <div>
+            <label class="label" for="f-date">Publish date</label>
+            <input class="input" id="f-date" type="datetime-local">
+            <div class="help" id="date-help">Your local time. A future date schedules the post.</div>
+          </div>
+          <div>
+            <label class="label" for="f-category">Category</label>
+            <input class="input" id="f-category" list="category-list" placeholder="Notes" autocomplete="off">
+            <datalist id="category-list">
+              <option value="Prompting"></option>
+              <option value="Notes"></option>
+            </datalist>
+          </div>
+          <div class="full">
+            <label class="label" for="f-tags">Tags</label>
+            <input class="input" id="f-tags" placeholder="prompts, basics" autocomplete="off">
+            <div class="help">Separate tags with commas.</div>
+          </div>
+          <div class="full">
+            <label class="label" for="f-excerpt">Excerpt</label>
+            <textarea class="input" id="f-excerpt" rows="2" maxlength="300" placeholder="Short summary for cards and search results (optional)"></textarea>
+          </div>
+          <div>
+            <label class="check"><input type="checkbox" id="f-draft" checked> Draft (not published)</label>
+          </div>
+          <div>
+            <label class="check"><input type="checkbox" id="f-featured"> Featured on home page</label>
+          </div>
+        </div>
+        <details id="more">
+          <summary>Cover image &amp; SEO</summary>
+          <div class="grid">
+            <div class="full">
+              <label class="label" for="f-image">Cover image</label>
+              <input class="input" id="f-image" placeholder="/images/my-cover.webp" autocomplete="off" spellcheck="false">
+              <div class="help">Put the file in <code>public/images/</code> and write <code>/images/file-name.webp</code>.</div>
+            </div>
+            <div class="full">
+              <label class="label" for="f-imageAlt">Cover image description (alt text)</label>
+              <input class="input" id="f-imageAlt" autocomplete="off">
+            </div>
+            <div class="full">
+              <label class="label" for="f-metaTitle">SEO title</label>
+              <input class="input" id="f-metaTitle" maxlength="120" placeholder="Defaults to the title" autocomplete="off">
+            </div>
+            <div class="full">
+              <label class="label" for="f-metaDescription">SEO description</label>
+              <textarea class="input" id="f-metaDescription" rows="2" maxlength="300" placeholder="Defaults to the excerpt"></textarea>
+            </div>
+            <div class="full">
+              <label class="label" for="f-ogImage">Social share image</label>
+              <input class="input" id="f-ogImage" placeholder="Defaults to the cover image" autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div class="card body-card">
+        <div class="toolbar" role="toolbar" aria-label="Formatting">
+          <button type="button" data-cmd="h2" title="Heading">H2</button>
+          <button type="button" data-cmd="h3" title="Sub-heading">H3</button>
+          <button type="button" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+          <button type="button" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+          <button type="button" data-cmd="link" title="Link (Ctrl+K)">Link</button>
+          <button type="button" data-cmd="code" title="Inline code">`code`</button>
+          <span class="sep"></span>
+          <button type="button" data-cmd="ul" title="Bulleted list">• List</button>
+          <button type="button" data-cmd="ol" title="Numbered list">1. List</button>
+          <button type="button" data-cmd="quote" title="Quote">“ Quote</button>
+          <button type="button" data-cmd="hr" title="Divider">―</button>
+          <span class="sep"></span>
+          <button type="button" data-cmd="prompt" class="accent" title="Prompt box with a Copy button">Prompt</button>
+          <button type="button" data-cmd="codeblock" title="Code block">Code</button>
+          <button type="button" data-cmd="image" title="Image with caption">Image</button>
+          <button type="button" data-cmd="youtube" title="YouTube video">YouTube</button>
+          <button type="button" data-cmd="table" title="Table">Table</button>
+        </div>
+        <label for="body" class="sr-only">Post content (Markdown)</label>
+        <textarea id="body" spellcheck="true" placeholder="Write your post in Markdown…"></textarea>
+        <div class="counter" id="counter">0 words</div>
+      </div>
+    </section>
+
+    <section class="pane preview-pane" aria-label="Preview">
+      <p class="notice">Preview: close to the live site. Code colours are added when the site is built.</p>
+      <article class="article">
+        <header>
+          <div class="cat" id="p-cat"></div>
+          <h1 id="p-title"></h1>
+          <div class="meta" id="p-meta"></div>
+          <div class="badges" id="p-badges"></div>
+        </header>
+        <div id="p-cover"></div>
+        <div class="content-wrap">
+          <div class="post-content" id="p-content"></div>
+          <div class="tags" id="p-tags" hidden></div>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <!-- Insert dialog (prompt box, image, YouTube, link) -->
+  <dialog id="dlg">
+    <form method="dialog" id="dlg-form">
+      <h2 id="dlg-title"></h2>
+      <div id="dlg-fields"></div>
+      <div class="actions">
+        <button class="btn" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn btn-primary" value="ok" id="dlg-ok">Insert</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                              */
+/* ------------------------------------------------------------------ */
+const $ = (id) => document.getElementById(id);
+const STORAGE_KEY = "ai-blog-post-editor-draft";
+// Must match src/lib/utils.ts
+const RESERVED = ["about", "search", "category", "tag", "page", "images", "pagefind", "rss.xml", "sitemap.xml", "robots.txt", "_next", "404"];
+
+function slugify(input) {
+  return input
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/[\s_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// Same rules as parseYouTubeId in src/lib/utils.ts
+function parseYouTubeId(url) {
+  const s = url.trim();
+  if (/^[\w-]{11}$/.test(s)) return s;
+  try {
+    const u = new URL(s);
+    const host = u.hostname.replace(/^www\.|^m\./, "");
+    if (host === "youtu.be") return u.pathname.slice(1, 12) || null;
+    if (host === "youtube.com" || host === "youtube-nocookie.com" || host === "music.youtube.com") {
+      if (u.searchParams.get("v")) return u.searchParams.get("v").slice(0, 11);
+      const m = u.pathname.match(/^\/(?:embed|shorts|live|v)\/([\w-]{11})/);
+      if (m) return m[1];
+    }
+  } catch { /* not a URL */ }
+  return null;
+}
+
+// Your live blog. When the editor is opened from a web address (not a file on this
+// computer), "/images/..." previews are loaded from here.
+const BLOG_URL = "https://timmyw88.github.io/ai-notebook";
+const IS_LOCAL_FILE = location.protocol === "file:";
+
+/**
+ * "/images/x.webp" → "../public/images/x.webp" when opened from the blog folder,
+ * or → the live blog's copy when opened online.
+ */
+function previewSrc(url) {
+  if (/^\/(?!\/)/.test(url)) return (IS_LOCAL_FILE ? "../public" : BLOG_URL) + url;
+  return url;
+}
+
+function safeUrl(url) {
+  const u = url.trim();
+  if (/^(javascript|vbscript|data):/i.test(u) && !/^data:image\//i.test(u)) return "#";
+  return u;
+}
+
+function pad(n) { return String(n).padStart(2, "0"); }
+function toLocalInput(date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+function toIsoUtc(localValue) {
+  const d = new Date(localValue);
+  if (isNaN(d)) return null;
+  return d.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+function formatDate(d) {
+  return new Intl.DateTimeFormat("en-US", { year: "numeric", month: "long", day: "numeric" }).format(d);
+}
+
+let toastTimer;
+function toast(msg, ms = 3500) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), ms);
+}
+
+/* ------------------------------------------------------------------ */
+/* Markdown → HTML for the preview (mirrors src/lib/markdown.ts)        */
+/* Raw HTML is shown as text, the same way the site ignores it.         */
+/* ------------------------------------------------------------------ */
+function inline(src) {
+  const slots = [];
+  const keep = (html) => `\u0000${slots.push(html) - 1}\u0000`;
+  let s = src;
+
+  // Inline code first, so its contents are left alone
+  s = s.replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, (_, _t, code) => keep(`<code>${escapeHtml(code.trim())}</code>`));
+  // Escaped characters
+  s = s.replace(/\\([\\`*_{}\[\]()#+\-.!|~>])/g, (_, c) => keep(escapeHtml(c)));
+  // Images ![alt](url "title")
+  s = s.replace(/!\[([^\]]*)\]\(\s*<?([^\s)>]+)>?(?:\s+"([^"]*)")?\s*\)/g, (_, alt, url, title) =>
+    keep(`<img src="${escapeHtml(previewSrc(safeUrl(url)))}" alt="${escapeHtml(alt)}"${title ? ` title="${escapeHtml(title)}"` : ""} onerror="imgError(this)">`));
+  // Links [text](url)
+  s = s.replace(/\[([^\]]+)\]\(\s*<?([^\s)>]+)>?(?:\s+"([^"]*)")?\s*\)/g, (_, text, url) =>
+    keep(`<a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noopener noreferrer">`) + text + keep("</a>"));
+  // Bare URLs
+  s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+[^\s<).,;:!?'"])/g, (_, pre, url) =>
+    pre + keep(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`));
+
+  // The site removes raw HTML tags (their text stays), so the preview does too
+  s = s.replace(/<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>/g, "");
+
+  s = escapeHtml(s);
+  s = s
+    .replace(/\*\*\*(?=\S)([\s\S]*?\S)\*\*\*/g, "<strong><em>$1</em></strong>")
+    .replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^\w])__(?=\S)([\s\S]*?\S)__(?!\w)/g, "$1<strong>$2</strong>")
+    .replace(/\*(?=[^\s*])([^*]*?[^\s*])\*/g, "<em>$1</em>")
+    .replace(/\*([^\s*])\*/g, "<em>$1</em>")
+    .replace(/(^|[^\w])_(?=\S)([^_]*?\S)_(?!\w)/g, "$1<em>$2</em>")
+    .replace(/~~(?=\S)([\s\S]*?\S)~~/g, "<del>$1</del>")
+    .replace(/ {2,}\n|\\\n/g, "<br>")
+    .replace(/\n/g, " ");
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => slots[+i]);
+}
+
+function splitRow(line) {
+  let l = line.trim();
+  if (l.startsWith("|")) l = l.slice(1);
+  if (l.endsWith("|") && !l.endsWith("\\|")) l = l.slice(0, -1);
+  const cells = [];
+  let cur = "";
+  for (let i = 0; i < l.length; i++) {
+    if (l[i] === "\\" && l[i + 1] === "|") { cur += "|"; i++; continue; }
+    if (l[i] === "|") { cells.push(cur.trim()); cur = ""; continue; }
+    cur += l[i];
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+
+const RE = {
+  fence: /^ {0,3}(`{3,}|~{3,})\s*([^\s`]*)\s*(.*)$/,
+  heading: /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/,
+  hr: /^ {0,3}([-*_])(\s*\1){2,}\s*$/,
+  quote: /^ {0,3}>\s?/,
+  list: /^( *)([-*+]|\d{1,9}[.)])\s+(.*)$/,
+  tableSep: /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/,
+  blank: /^\s*$/,
+};
+
+function renderBlocks(lines) {
+  let html = "";
+  let i = 0;
+  const isBlockStart = (l, next) =>
+    RE.fence.test(l) || RE.heading.test(l) || RE.hr.test(l) || RE.quote.test(l) || RE.list.test(l) ||
+    (l.includes("|") && next !== undefined && RE.tableSep.test(next) && next.includes("-"));
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (RE.blank.test(line)) { i++; continue; }
+
+    // Fenced code / prompt
+    let m = line.match(RE.fence);
+    if (m) {
+      const fence = m[1];
+      const lang = m[2].toLowerCase();
+      const meta = m[3];
+      const body = [];
+      i++;
+      while (i < lines.length && !new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`).test(lines[i])) body.push(lines[i++]);
+      i++; // closing fence
+      const code = body.join("\n");
+      if (lang === "prompt") {
+        const t = meta.match(/title=(?:"([^"]*)"|'([^']*)'|(\S+))/);
+        const label = t ? (t[1] ?? t[2] ?? t[3]) : "Prompt";
+        html += `<div class="prompt-block"><div class="prompt-head"><span class="prompt-title">${escapeHtml(label)}</span>` +
+          `<button type="button" class="prompt-copy">Copy</button></div><pre class="prompt-text">${escapeHtml(code)}</pre></div>`;
+      } else {
+        html += `<pre><code${lang ? ` class="language-${escapeHtml(lang)}"` : ""}>${escapeHtml(code)}</code></pre>`;
+      }
+      continue;
+    }
+
+    // Heading
+    m = line.match(RE.heading);
+    if (m) {
+      const level = m[1].length;
+      html += `<h${level}>${inline(m[2])}</h${level}>`;
+      i++;
+      continue;
+    }
+
+    // Divider
+    if (RE.hr.test(line)) { html += "<hr>"; i++; continue; }
+
+    // Quote
+    if (RE.quote.test(line)) {
+      const inner = [];
+      while (i < lines.length && !RE.blank.test(lines[i]) && (RE.quote.test(lines[i]) || !isBlockStart(lines[i], lines[i + 1]))) {
+        inner.push(lines[i].replace(RE.quote, ""));
+        i++;
+      }
+      html += `<blockquote>${renderBlocks(inner)}</blockquote>`;
+      continue;
+    }
+
+    // Table
+    if (line.includes("|") && i + 1 < lines.length && RE.tableSep.test(lines[i + 1]) && lines[i + 1].includes("-")) {
+      const head = splitRow(line);
+      const aligns = splitRow(lines[i + 1]).map((c) => (c.startsWith(":") && c.endsWith(":") ? "center" : c.endsWith(":") ? "right" : c.startsWith(":") ? "left" : ""));
+      i += 2;
+      const rows = [];
+      while (i < lines.length && !RE.blank.test(lines[i]) && lines[i].includes("|")) rows.push(splitRow(lines[i++]));
+      const cell = (tag, text, k) => `<${tag}${aligns[k] ? ` style="text-align:${aligns[k]}"` : ""}>${inline(text ?? "")}</${tag}>`;
+      html += `<div class="table-wrap"><table><thead><tr>${head.map((c, k) => cell("th", c, k)).join("")}</tr></thead><tbody>` +
+        rows.map((r) => `<tr>${head.map((_, k) => cell("td", r[k], k)).join("")}</tr>`).join("") + `</tbody></table></div>`;
+      continue;
+    }
+
+    // List
+    m = line.match(RE.list);
+    if (m) {
+      const baseIndent = m[1].length;
+      const ordered = /\d/.test(m[2]);
+      const start = ordered ? parseInt(m[2], 10) : 1;
+      const items = [];
+      let cur = null;
+      let sawBlank = false;
+      while (i < lines.length) {
+        const l = lines[i];
+        const lm = l.match(RE.list);
+        if (lm && lm[1].length <= baseIndent + 1 && /\d/.test(lm[2]) === ordered) {
+          cur = [lm[3]];
+          items.push(cur);
+          sawBlank = false;
+          i++;
+        } else if (RE.blank.test(l)) {
+          // a blank line ends the list unless the next line continues it
+          const next = lines[i + 1];
+          if (next === undefined) break;
+          const nm = next.match(RE.list);
+          if ((nm && nm[1].length <= baseIndent + 1 && /\d/.test(nm[2]) === ordered) || /^\s{2,}\S/.test(next)) {
+            sawBlank = true;
+            cur && cur.push("");
+            i++;
+          } else break;
+        } else if (/^\s{2,}\S/.test(l) || (!sawBlank && !isBlockStart(l, lines[i + 1]))) {
+          cur.push(l.replace(new RegExp(`^ {0,${baseIndent + 4}}`), ""));
+          i++;
+        } else break;
+      }
+      const tag = ordered ? "ol" : "ul";
+      html += `<${tag}${ordered && start !== 1 ? ` start="${start}"` : ""}>` +
+        items.map((it) => {
+          const inner = renderBlocks(it);
+          // Tight items: drop the <p> wrapper around a single paragraph
+          const tight = inner.replace(/^<p>([\s\S]*?)<\/p>/, "$1");
+          return `<li>${tight}</li>`;
+        }).join("") + `</${tag}>`;
+      continue;
+    }
+
+    // Paragraph
+    const para = [];
+    while (i < lines.length && !RE.blank.test(lines[i]) && (para.length === 0 || !isBlockStart(lines[i], lines[i + 1]))) para.push(lines[i++]);
+    const text = para.join("\n").trim();
+    // A block of raw HTML is removed by the site
+    if (/^<(\/?[A-Za-z][\w-]*|!--)[\s\S]*>$/.test(text)) continue;
+
+    // A paragraph that is only a YouTube link → embed
+    const linkOnly = text.match(/^<?(https?:\/\/\S+?)>?$/) || text.match(/^\[[^\]]*\]\((https?:\/\/[^)\s]+)\)$/);
+    const ytId = linkOnly && /youtu\.?be/.test(linkOnly[1]) ? parseYouTubeId(linkOnly[1]) : null;
+    if (ytId) {
+      html += `<div class="video-embed"><iframe src="https://www.youtube-nocookie.com/embed/${escapeHtml(ytId)}" title="YouTube video" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`;
+      continue;
+    }
+    // A paragraph that is only an image → figure with caption
+    const img = text.match(/^!\[([^\]]*)\]\(\s*<?([^\s)>]+)>?(?:\s+"([^"]*)")?\s*\)$/);
+    if (img) {
+      html += `<figure><img src="${escapeHtml(previewSrc(safeUrl(img[2])))}" alt="${escapeHtml(img[1])}" onerror="imgError(this)">` +
+        (img[3] ? `<figcaption>${escapeHtml(img[3])}</figcaption>` : "") + `</figure>`;
+      continue;
+    }
+    html += `<p>${inline(text)}</p>`;
+  }
+  return html;
+}
+
+function markdownToHtml(md) {
+  return renderBlocks(md.replace(/\r\n?/g, "\n").replace(/\t/g, "    ").split("\n"));
+}
+
+// Shown when an image can't be found (e.g. not copied into public/images yet)
+window.imgError = function (img) {
+  const span = document.createElement("span");
+  span.className = "img-missing";
+  const path = img.getAttribute("src").replace(/^\.\.\/public/, "").replace(BLOG_URL, "");
+  span.textContent = IS_LOCAL_FILE
+    ? `Image not found: ${path} (put the file in public/images/)`
+    : `Image not on your live blog yet: ${path} (it will show once the file is in public/images/ and pushed)`;
+  img.replaceWith(span);
+};
+
+/* ------------------------------------------------------------------ */
+/* Form state                                                           */
+/* ------------------------------------------------------------------ */
+const FIELDS = ["title", "slug", "date", "category", "tags", "excerpt", "draft", "featured", "image", "imageAlt", "metaTitle", "metaDescription", "ogImage"];
+const body = $("body");
+let slugTouched = false;
+let keptUpdated = ""; // "updated:" from an opened file, written back unchanged
+
+function getState() {
+  const s = {};
+  for (const f of FIELDS) {
+    const el = $("f-" + f);
+    s[f] = el.type === "checkbox" ? el.checked : el.value;
+  }
+  s.body = body.value;
+  s.slugTouched = slugTouched;
+  s.updated = keptUpdated;
+  return s;
+}
+
+function setState(s) {
+  for (const f of FIELDS) {
+    const el = $("f-" + f);
+    if (el.type === "checkbox") el.checked = !!s[f];
+    else el.value = s[f] ?? "";
+  }
+  body.value = s.body ?? "";
+  slugTouched = !!s.slugTouched;
+  keptUpdated = typeof s.updated === "string" ? s.updated : "";
+  if (s.image || s.imageAlt || s.metaTitle || s.metaDescription || s.ogImage) $("more").open = true;
+}
+
+function emptyState() {
+  return {
+    title: "", slug: "", date: toLocalInput(new Date()), category: "Notes", tags: "", excerpt: "",
+    draft: true, featured: false, image: "", imageAlt: "", metaTitle: "", metaDescription: "", ogImage: "",
+    body: "", slugTouched: false, updated: "",
+  };
+}
+
+function tagList(s) {
+  const seen = new Set();
+  return s.tags.split(",").map((t) => t.trim()).filter((t) => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()));
+}
+
+/* ------------------------------------------------------------------ */
+/* Markdown file output                                                 */
+/* ------------------------------------------------------------------ */
+// JSON strings are valid YAML double-quoted strings, so values are always safe.
+const q = (v) => JSON.stringify(v);
+
+function buildMarkdown(s) {
+  const lines = ["---", `title: ${q(s.title.trim())}`, `date: ${toIsoUtc(s.date)}`];
+  lines.push(`excerpt: ${q(s.excerpt.trim())}`);
+  lines.push(`category: ${q(s.category.trim())}`);
+  lines.push(`tags: ${q(tagList(s))}`);
+  lines.push(`featured: ${s.featured}`);
+  lines.push(`image: ${q(s.image.trim())}`);
+  lines.push(`imageAlt: ${q(s.imageAlt.trim())}`);
+  lines.push(`draft: ${s.draft}`);
+  if (s.metaTitle.trim()) lines.push(`metaTitle: ${q(s.metaTitle.trim())}`);
+  if (s.metaDescription.trim()) lines.push(`metaDescription: ${q(s.metaDescription.trim())}`);
+  if (s.ogImage.trim()) lines.push(`ogImage: ${q(s.ogImage.trim())}`);
+  if (s.updated && !isNaN(new Date(s.updated))) lines.push(`updated: ${q(s.updated)}`);
+  lines.push("---", "", "");
+  return lines.join("\n") + s.body.replace(/\r\n?/g, "\n").replace(/\s+$/, "") + "\n";
+}
+
+function validate(s) {
+  const errors = [];
+  const titleOk = !!s.title.trim();
+  $("err-title").hidden = titleOk;
+  $("f-title").setAttribute("aria-invalid", String(!titleOk));
+  if (!titleOk) errors.push("title");
+
+  const slug = slugify(s.slug);
+  let slugErr = "";
+  if (!slug) slugErr = "A file name is required (it is filled in from the title).";
+  else if (RESERVED.includes(slug)) slugErr = `"${slug}" is used by the site itself. Choose another name.`;
+  $("err-slug").hidden = !slugErr;
+  $("err-slug").textContent = slugErr;
+  $("f-slug").setAttribute("aria-invalid", String(!!slugErr));
+  if (slugErr) errors.push("slug");
+
+  if (!toIsoUtc(s.date)) errors.push("date");
+  return errors;
+}
+
+/* ------------------------------------------------------------------ */
+/* Preview + autosave                                                   */
+/* ------------------------------------------------------------------ */
+let renderTimer;
+let saveTimer;
+
+function render() {
+  const s = getState();
+  const slug = slugify(s.slug);
+  $("slug-help").innerHTML = slug
+    ? `Save as <code>content/posts/${escapeHtml(slug)}.md</code> → URL <code>/${escapeHtml(slug)}/</code>`
+    : "Filled in from the title. Lowercase letters, numbers and dashes.";
+
+  const d = new Date(s.date);
+  const future = !isNaN(d) && d > new Date();
+  $("date-help").textContent = future
+    ? `Scheduled: goes live on ${formatDate(d)} (after the daily rebuild).`
+    : "Your local time. A future date schedules the post.";
+
+  $("p-cat").textContent = s.category.trim();
+  $("p-title").textContent = s.title.trim() || "Untitled post";
+  const words = s.body.split(/\s+/).filter(Boolean).length;
+  const minutes = Math.max(1, Math.round(words / 225));
+  $("p-meta").textContent = `${isNaN(d) ? "No date" : formatDate(d)} · ${minutes} min read`;
+  $("counter").textContent = `${words} word${words === 1 ? "" : "s"} · about ${minutes} min read`;
+
+  const badges = [];
+  if (s.draft) badges.push(`<span class="badge red">Draft</span>`);
+  if (future) badges.push(`<span class="badge">Scheduled</span>`);
+  if (s.featured) badges.push(`<span class="badge">Featured</span>`);
+  $("p-badges").innerHTML = badges.join("");
+
+  $("p-cover").innerHTML = s.image.trim()
+    ? `<img class="cover" src="${escapeHtml(previewSrc(safeUrl(s.image.trim())))}" alt="${escapeHtml(s.imageAlt)}" onerror="imgError(this)">`
+    : "";
+
+  $("p-content").innerHTML = markdownToHtml(s.body) || `<p style="color:var(--faint)">Your post will appear here.</p>`;
+
+  const tags = tagList(s);
+  $("p-tags").hidden = !tags.length;
+  $("p-tags").innerHTML = tags.map((t) => `<span>#${escapeHtml(t)}</span>`).join("");
+}
+
+function scheduleRender() {
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(render, 120);
+  clearTimeout(saveTimer);
+  $("status").textContent = "Editing…";
+  saveTimer = setTimeout(autosave, 600);
+}
+
+function autosave() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(getState()));
+    $("status").textContent = "Draft kept in this browser";
+  } catch {
+    $("status").textContent = "";
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Open an existing .md file                                            */
+/* ------------------------------------------------------------------ */
+function parseYamlValue(raw) {
+  const v = raw.trim();
+  if (v === "") return "";
+  if (v === "true" || v === "false") return v === "true";
+  if (v.startsWith('"')) { try { return JSON.parse(v); } catch { return v.slice(1, -1); } }
+  if (v.startsWith("'")) return v.slice(1, -1).replace(/''/g, "'");
+  if (v.startsWith("[")) {
+    try { return JSON.parse(v); } catch {
+      return v.slice(1, -1).split(",").map((t) => t.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+    }
+  }
+  return v.replace(/\s+#.*$/, "");
+}
+
+function parsePostFile(text, fileName) {
+  const src = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  const m = src.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  const data = {};
+  let content = src;
+  if (m) {
+    content = m[2].replace(/^\n/, "");
+    let lastKey = null;
+    for (const line of m[1].split("\n")) {
+      const kv = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
+      if (kv) { lastKey = kv[1]; data[lastKey] = parseYamlValue(kv[2]); }
+      else if (lastKey && /^\s*-\s+/.test(line)) {
+        // block-style list (tags:\n  - a\n  - b)
+        if (!Array.isArray(data[lastKey])) data[lastKey] = [];
+        data[lastKey].push(String(parseYamlValue(line.replace(/^\s*-\s+/, ""))));
+      }
+    }
+  }
+  const date = data.date ? new Date(data.date) : new Date();
+  return {
+    title: String(data.title ?? ""),
+    slug: slugify(fileName.replace(/\.(md|mdx|markdown)$/i, "")),
+    date: toLocalInput(isNaN(date) ? new Date() : date),
+    category: String(data.category ?? ""),
+    tags: Array.isArray(data.tags) ? data.tags.join(", ") : String(data.tags ?? ""),
+    excerpt: String(data.excerpt ?? ""),
+    draft: data.draft === true,
+    featured: data.featured === true,
+    image: String(data.image ?? ""),
+    imageAlt: String(data.imageAlt ?? ""),
+    metaTitle: String(data.metaTitle ?? ""),
+    metaDescription: String(data.metaDescription ?? ""),
+    ogImage: String(data.ogImage ?? ""),
+    body: content,
+    slugTouched: true,
+    updated: data.updated ? String(data.updated) : "",
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Toolbar                                                              */
+/* ------------------------------------------------------------------ */
+function insertText(text, selectFrom, selectTo) {
+  body.focus();
+  const start = body.selectionStart;
+  const end = body.selectionEnd;
+  body.setRangeText(text, start, end, "end");
+  if (selectFrom !== undefined) body.setSelectionRange(start + selectFrom, start + (selectTo ?? selectFrom));
+  scheduleRender();
+}
+
+function wrap(before, after, placeholder) {
+  const start = body.selectionStart;
+  const end = body.selectionEnd;
+  const sel = body.value.slice(start, end) || placeholder;
+  insertText(before + sel + after, before.length, before.length + sel.length);
+}
+
+/** Adds a prefix to each selected line (or the current line). */
+function prefixLines(make) {
+  const v = body.value;
+  const ls = v.lastIndexOf("\n", body.selectionStart - 1) + 1;
+  let le = v.indexOf("\n", Math.max(body.selectionEnd - (body.selectionEnd > body.selectionStart ? 1 : 0), body.selectionStart));
+  if (le === -1) le = v.length;
+  const lines = v.slice(ls, le).split("\n");
+  const out = lines.map((l, k) => make(k) + l.replace(/^(#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)/, "")).join("\n");
+  body.focus();
+  body.setRangeText(out, ls, le, "end");
+  scheduleRender();
+}
+
+/** Inserts a block on its own lines, with blank lines around it. */
+function insertBlock(text, selectFrom, selectTo) {
+  const v = body.value;
+  const start = body.selectionStart;
+  const end = body.selectionEnd;
+  const before = v.slice(0, start);
+  const after = v.slice(end);
+  const lead = before === "" || before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+  const trail = after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n";
+  const full = lead + text + trail;
+  body.focus();
+  body.setRangeText(full, start, end, "end");
+  if (selectFrom !== undefined) body.setSelectionRange(start + lead.length + selectFrom, start + lead.length + (selectTo ?? selectFrom));
+  else body.setSelectionRange(start + lead.length + text.length, start + lead.length + text.length);
+  scheduleRender();
+}
+
+/** Small form dialog. fields: [{name, label, value, placeholder, help, multiline, required}] */
+function ask(title, fields, okLabel = "Insert") {
+  return new Promise((resolve) => {
+    const dlg = $("dlg");
+    $("dlg-title").textContent = title;
+    $("dlg-ok").textContent = okLabel;
+    $("dlg-fields").innerHTML = fields.map((f, k) => `
+      <div style="margin-bottom:12px">
+        <label class="label" for="dlg-${k}">${escapeHtml(f.label)}</label>
+        ${f.multiline
+          ? `<textarea class="input" id="dlg-${k}" rows="6" placeholder="${escapeHtml(f.placeholder ?? "")}" ${f.required ? "required" : ""} style="font-family:var(--font-mono);font-size:13px"></textarea>`
+          : `<input class="input" id="dlg-${k}" placeholder="${escapeHtml(f.placeholder ?? "")}" ${f.required ? "required" : ""} autocomplete="off" spellcheck="false">`}
+        ${f.help ? `<div class="help">${escapeHtml(f.help)}</div>` : ""}
+      </div>`).join("");
+    fields.forEach((f, k) => { $("dlg-" + k).value = f.value ?? ""; });
+    const form = $("dlg-form");
+    const cursor = [body.selectionStart, body.selectionEnd]; // the dialog can move it, so put it back
+    const finish = (out) => {
+      form.removeEventListener("submit", onSubmit);
+      dlg.removeEventListener("cancel", onCancel);
+      if (dlg.open) dlg.close();
+      body.focus();
+      body.setSelectionRange(cursor[0], cursor[1]);
+      resolve(out);
+    };
+    // Handled on submit (not on "close") so it works the same in every browser
+    const onSubmit = (e) => {
+      e.preventDefault();
+      if (e.submitter?.value !== "ok") return finish(null);
+      const out = {};
+      fields.forEach((f, k) => { out[f.name] = $("dlg-" + k).value; });
+      finish(out);
+    };
+    const onCancel = (e) => { e.preventDefault(); finish(null); }; // Esc key
+    form.addEventListener("submit", onSubmit);
+    dlg.addEventListener("cancel", onCancel);
+    dlg.showModal();
+    $("dlg-0").focus();
+  });
+}
+
+const selected = () => body.value.slice(body.selectionStart, body.selectionEnd);
+
+const commands = {
+  h2: () => prefixLines(() => "## "),
+  h3: () => prefixLines(() => "### "),
+  bold: () => wrap("**", "**", "bold text"),
+  italic: () => wrap("*", "*", "italic text"),
+  code: () => wrap("`", "`", "code"),
+  ul: () => prefixLines(() => "- "),
+  ol: () => prefixLines((k) => `${k + 1}. `),
+  quote: () => prefixLines(() => "> "),
+  hr: () => insertBlock("---"),
+  async link() {
+    const text = selected();
+    const r = await ask("Insert link", [
+      { name: "text", label: "Link text", value: text, placeholder: "Text to show", required: true },
+      { name: "url", label: "Address", placeholder: "https://example.com or /another-post/", required: true },
+    ]);
+    if (r) insertText(`[${r.text.trim()}](${r.url.trim()})`);
+  },
+  async prompt() {
+    const r = await ask("Insert prompt box", [
+      { name: "title", label: "Prompt title", placeholder: "Summarize an article", value: "" },
+      { name: "text", label: "Prompt", value: selected(), placeholder: "You are a helpful editor…", multiline: true, required: true,
+        help: "Shown in a box with a Copy button. Line breaks are kept." },
+    ]);
+    if (!r) return;
+    const title = r.title.trim().replace(/"/g, "'");
+    const text = r.text.replace(/\r\n?/g, "\n").replace(/\n+$/, "");
+    // Use a longer fence if the prompt itself contains ```
+    const longest = Math.max(2, ...(text.match(/`{3,}/g) || []).map((x) => x.length));
+    const fence = "`".repeat(longest + 1);
+    insertBlock(`${fence}prompt${title ? ` title="${title}"` : ""}\n${text}\n${fence}`);
+  },
+  codeblock() {
+    const sel = selected() || "your code here";
+    const lang = "python";
+    const text = "```" + lang + "\n" + sel + "\n```";
+    insertBlock(text, 3, 3 + lang.length);
+    toast("Change \"python\" to your language: js, ts, bash, json, html, css…");
+  },
+  async image() {
+    const r = await ask("Insert image", [
+      { name: "src", label: "Image path", placeholder: "/images/my-diagram.webp", required: true,
+        help: "Put the file in public/images/ first. Full https:// links work too." },
+      { name: "alt", label: "Description (alt text)", placeholder: "What the image shows" },
+      { name: "caption", label: "Caption (optional)", placeholder: "Shown under the image" },
+    ]);
+    if (!r) return;
+    let src = r.src.trim().replace(/\\/g, "/");
+    src = src.replace(/^.*?public(\/images\/)/i, "$1"); // pasted a full Windows path
+    if (!/^(https?:)?\//i.test(src)) src = "/images/" + src.replace(/^images\//i, "");
+    const caption = r.caption.trim().replace(/"/g, "'");
+    insertBlock(`![${r.alt.trim().replace(/[\[\]]/g, "")}](${src.replace(/ /g, "%20")}${caption ? ` "${caption}"` : ""})`);
+  },
+  async youtube() {
+    const r = await ask("Insert YouTube video", [
+      { name: "url", label: "YouTube link", placeholder: "https://www.youtube.com/watch?v=…", required: true },
+    ]);
+    if (!r) return;
+    const id = parseYouTubeId(r.url);
+    if (!id) return toast("That doesn't look like a YouTube link.");
+    insertBlock(`https://www.youtube.com/watch?v=${id}`);
+  },
+  table() {
+    insertBlock("| Column 1 | Column 2 |\n|---|---|\n| Cell | Cell |\n| Cell | Cell |", 2, 10);
+  },
+};
+
+/* ------------------------------------------------------------------ */
+/* Actions                                                              */
+/* ------------------------------------------------------------------ */
+function download() {
+  const s = getState();
+  const errors = validate(s);
+  if (errors.length) {
+    if (errors.includes("title")) $("f-title").focus();
+    else if (errors.includes("slug")) $("f-slug").focus();
+    else $("f-date").focus();
+    showView("edit");
+    return toast("Please fix the highlighted fields first.");
+  }
+  const slug = slugify(s.slug);
+  if (s.slug !== slug) $("f-slug").value = slug;
+  const blob = new Blob([buildMarkdown(s)], { type: "text/markdown;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${slug}.md`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast(`Downloaded ${slug}.md. Move it into content/posts/` + (s.draft ? " (it's still a draft)." : "."), 6000);
+}
+
+function newPost() {
+  const s = getState();
+  if ((s.title || s.body) && !confirm("Start a new post? The current one is cleared (download it first if you need it).")) return;
+  setState(emptyState());
+  validateQuiet();
+  render();
+  autosave();
+  $("f-title").focus();
+}
+
+function validateQuiet() {
+  ["err-title", "err-slug"].forEach((id) => { $(id).hidden = true; });
+  ["f-title", "f-slug"].forEach((id) => $(id).removeAttribute("aria-invalid"));
+}
+
+function showView(view) {
+  document.body.dataset.view = view;
+  document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.view === view)));
+}
+
+/* ------------------------------------------------------------------ */
+/* Wiring                                                               */
+/* ------------------------------------------------------------------ */
+$("f-title").addEventListener("input", () => {
+  if (!slugTouched) $("f-slug").value = slugify($("f-title").value);
+  if ($("f-title").value.trim()) { $("err-title").hidden = true; $("f-title").removeAttribute("aria-invalid"); }
+  scheduleRender();
+});
+$("f-slug").addEventListener("input", () => {
+  slugTouched = $("f-slug").value.trim() !== "";
+  scheduleRender();
+});
+$("f-slug").addEventListener("blur", () => {
+  if (!$("f-slug").value.trim()) { slugTouched = false; $("f-slug").value = slugify($("f-title").value); }
+  else $("f-slug").value = slugify($("f-slug").value);
+  scheduleRender();
+});
+for (const f of FIELDS) if (f !== "title" && f !== "slug") $("f-" + f).addEventListener("input", scheduleRender);
+for (const f of ["draft", "featured"]) $("f-" + f).addEventListener("change", scheduleRender);
+body.addEventListener("input", scheduleRender);
+
+document.querySelector(".toolbar").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-cmd]");
+  if (btn) commands[btn.dataset.cmd]();
+});
+
+body.addEventListener("keydown", (e) => {
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.key.toLowerCase() === "b") { e.preventDefault(); commands.bold(); }
+  else if (mod && e.key.toLowerCase() === "i") { e.preventDefault(); commands.italic(); }
+  else if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); commands.link(); }
+  else if (e.key === "Tab" && !mod && !e.altKey) {
+    e.preventDefault();
+    insertText("  ");
+  } else if (e.key === "Enter" && !mod && !e.shiftKey) {
+    // Continue lists and quotes on Enter
+    const v = body.value;
+    const pos = body.selectionStart;
+    const ls = v.lastIndexOf("\n", pos - 1) + 1;
+    const line = v.slice(ls, pos);
+    const m = line.match(/^(\s*)([-*+]|\d+[.)]|>)(\s+)(.*)$/);
+    if (!m || body.selectionStart !== body.selectionEnd) return;
+    e.preventDefault();
+    if (!m[4].trim()) { body.setRangeText("", ls, pos, "end"); scheduleRender(); return; } // empty item ends the list
+    let marker = m[2];
+    if (/^\d/.test(marker)) marker = `${parseInt(marker, 10) + 1}${marker.slice(-1)}`;
+    insertText(`\n${m[1]}${marker}${m[3]}`);
+  }
+});
+
+// Copy buttons in the preview behave like on the site
+$("p-content").addEventListener("click", async (e) => {
+  const btn = e.target.closest(".prompt-copy");
+  if (!btn) return;
+  const text = btn.closest(".prompt-block").querySelector(".prompt-text").textContent;
+  try { await navigator.clipboard.writeText(text); } catch { /* file:// may block clipboard */ }
+  btn.textContent = "Copied!";
+  btn.dataset.copied = "true";
+  setTimeout(() => { btn.textContent = "Copy"; delete btn.dataset.copied; }, 2000);
+});
+
+$("btn-download").addEventListener("click", download);
+$("btn-new").addEventListener("click", newPost);
+$("btn-open").addEventListener("click", () => $("file-open").click());
+$("file-open").addEventListener("change", async () => {
+  const file = $("file-open").files[0];
+  $("file-open").value = "";
+  if (!file) return;
+  const s = getState();
+  if ((s.title || s.body) && !confirm(`Open ${file.name}? The current post in the editor is replaced.`)) return;
+  setState(parsePostFile(await file.text(), file.name));
+  validateQuiet();
+  render();
+  autosave();
+  toast(`Opened ${file.name}. Download it again and replace the old file to save changes.`, 6000);
+});
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); download(); }
+});
+
+// Start: restore the last unsaved draft from this browser, if any
+(function init() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch { saved = null; }
+  setState(saved && typeof saved === "object" ? { ...emptyState(), ...saved } : emptyState());
+  if (saved && (saved.title || saved.body)) $("status").textContent = "Restored your last draft";
+  render();
+})();
+</script>
+</body>
+</html>
