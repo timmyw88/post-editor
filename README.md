@@ -12,6 +12,6 @@ Open it at **https://timmyw88.github.io/post-editor/**, or download `index.html`
 - Everything runs in your browser. Nothing is sent anywhere, and the page can't change the blog.
 - Your unfinished post is kept in this browser only (other visitors never see it).
 - Image previews for `/images/...` paths load from the live blog, so new images show after you push them.
-- Search engines are asked not to list this page (`noindex` + `robots.txt`).
+- Search engines are asked not to list this page (a `noindex` tag in the page).
 
 A copy of this file also lives in the blog folder at `tools/post-editor.html` (git-ignored there).
